@@ -1,4 +1,4 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -75,8 +75,23 @@ struct GatherCandidatesSrflxParams {
     network_types: Vec<NetworkType>,
     port_max: u16,
     port_min: u16,
+    interface_filter: Arc<Option<InterfaceFilterFn>>,
+    ip_filter: Arc<Option<IpFilterFn>>,
     net: Arc<Net>,
     agent_internal: Arc<AgentInternal>,
+}
+
+/// TUN proxies (Shadowrocket, Clash/mihomo, sing-box, Surge) give their interface an address in
+/// 198.18.0.0/15; a socket bound there only reaches the proxy, so it is no base for a reflexive
+/// candidate. Link-local has no route to a STUN server at all.
+fn srflx_base_unusable(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            (o[0] == 198 && (o[1] & 0xfe) == 18) || (o[0] == 169 && o[1] == 254)
+        }
+        IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) == 0xfe80,
+    }
 }
 
 impl Agent {
@@ -125,6 +140,8 @@ impl Agent {
                         network_types: params.network_types.clone(),
                         port_max: ephemeral_config.port_max(),
                         port_min: ephemeral_config.port_min(),
+                        interface_filter: Arc::clone(&params.interface_filter),
+                        ip_filter: Arc::clone(&params.ip_filter),
                         net: Arc::clone(&params.net),
                         agent_internal: Arc::clone(&params.agent_internal),
                     };
@@ -606,6 +623,8 @@ impl Agent {
             network_types,
             port_max,
             port_min,
+            interface_filter,
+            ip_filter,
             net,
             agent_internal,
         } = params;
@@ -616,7 +635,37 @@ impl Agent {
                 continue;
             }
 
+            // Reflexive candidates used to come only from a socket bound to the unspecified
+            // address. Such a socket follows the default route, and on a machine running a TUN
+            // proxy that route is the TUN: the proxy re-sends each flow from a socket of its own,
+            // so the STUN server reports a mapping that the connectivity checks, re-sent the same
+            // way, never use. The machine then looks symmetric even behind a cone NAT and every
+            // session falls back to TURN. Binding a socket to each interface address as well, as
+            // libwebrtc does per network, keeps that socket on its interface (macOS scopes the
+            // route by source address), so its reflexive candidate is the NAT's real mapping.
+            // The unspecified socket stays as the last entry: it is what reaches the STUN server
+            // when nothing else can, as before.
+            let is_ipv4 = network_type.is_ipv4();
+            let mut bases: Vec<IpAddr> = local_interfaces(
+                &net,
+                &interface_filter,
+                &ip_filter,
+                &[network_type],
+                false,
+            )
+            .await
+            .into_iter()
+            .filter(|ip| ip.is_ipv4() == is_ipv4 && !ip.is_loopback() && !srflx_base_unusable(ip))
+            .collect();
+            bases.sort();
+            bases.push(if is_ipv4 {
+                Ipv4Addr::UNSPECIFIED.into()
+            } else {
+                Ipv6Addr::UNSPECIFIED.into()
+            });
+
             for url in &urls {
+            for base in bases.iter().copied() {
                 let network = network_type.to_string();
                 let is_ipv4 = network_type.is_ipv4();
                 let url = url.clone();
@@ -645,11 +694,7 @@ impl Agent {
                         &net2,
                         port_max,
                         port_min,
-                        if is_ipv4 {
-                            SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 0)
-                        } else {
-                            SocketAddr::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0).into(), 0)
-                        },
+                        SocketAddr::new(base, 0),
                     )
                     .await
                     {
@@ -731,6 +776,7 @@ impl Agent {
 
                     Result::<()>::Ok(())
                 });
+            }
             }
         }
 
