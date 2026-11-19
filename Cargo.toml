@@ -254,9 +254,30 @@ tungstenite = { git = "https://github.com/rustdesk-org/tungstenite-rs", rev = "e
 # Pinned by rev, not branch: a fork branch can be rewritten out from under the lockfile.
 # webrtc: SettingEngine cannot reach the ICE agent's max_binding_requests, which decides how
 # long the answerer keeps checking a pair that has not answered yet.
-webrtc = { git = "https://github.com/rustdesk-org/webrtc", rev = "49c89bd8d30e6e62e4c1a96cee38fdc11f79ef63" }
-webrtc-util = { git = "https://github.com/rustdesk-org/webrtc", rev = "49c89bd8d30e6e62e4c1a96cee38fdc11f79ef63" }
-webrtc-sctp = { git = "https://github.com/rustdesk-org/webrtc", rev = "49c89bd8d30e6e62e4c1a96cee38fdc11f79ef63" }
+webrtc = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-util = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-sctp = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+
+# The `webrtc` branch of this repository is rustdesk-org/webrtc @ 49c89bd8 plus one change in
+# webrtc-ice: server reflexive candidates are gathered from a socket per interface address,
+# not only from 0.0.0.0, so a machine running a TUN proxy still reports its real NAT mapping.
+# Every crate of that workspace is moved together, or two copies of webrtc-util would meet.
+[patch."https://github.com/rustdesk-org/webrtc"]
+interceptor = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+rtcp = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+rtp = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+sdp = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+stun = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+turn = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-data = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-dtls = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-ice = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-mdns = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-media = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-sctp = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-srtp = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
+webrtc-util = { git = "https://github.com/eret9616/rustdesk-tun-p2p", rev = "9d694bee401f82327d3bbb9ddb672564012bc932" }
 
 [package.metadata.winres]
 LegalCopyright = "Copyright © 2026 Purslane Tech Pte. Ltd. All rights reserved."
