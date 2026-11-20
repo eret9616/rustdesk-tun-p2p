@@ -20,6 +20,14 @@ Everything else is upstream: `main` is the 1.5.3 tree with the other CI workflow
 webrtc crates redirected in `Cargo.toml`, and `.github/workflows/tun-build.yml`, which follows
 upstream's macOS arm64 build without signing. The dmg it produces is unsigned.
 
+**Second change: TLS signaling to an IP server.** Upstream sends rendezvous and relay traffic
+for a server given by IP as plain `ws://IP:21118`/`21119`, never TLS, so the RustDesk protocol on
+its well-known ports stays visible on the wire. `libs/hbb_common` now points at this repository's
+`hbb_common` branch (upstream @ `fae47e02` plus one commit): when `websocket-port` is set for your
+own server, an IP endpoint gets `wss://IP[:port]/ws/id` and `/ws/relay`, the same paths a domain
+gets, behind a TLS reverse proxy. A Let's Encrypt certificate for a bare IP (6-day, auto-renewed)
+works for that. Without `websocket-port` nothing changes.
+
 **Limits.** Linux TUN proxies that route everything into the TUN with policy rules may not be
 bypassed by binding a source address; that needs `SO_BINDTODEVICE`, not done here.
 

@@ -1,3 +1,4 @@
 [submodule "libs/hbb_common"]
 	path = libs/hbb_common
-	url = https://github.com/rustdesk/hbb_common
+	url = https://github.com/eret9616/rustdesk-tun-p2p.git
+	branch = hbb_common
