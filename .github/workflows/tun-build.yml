@@ -167,3 +167,123 @@ jobs:
         with:
           name: rustdesk-${{ env.VERSION }}-aarch64-tun
           path: rustdesk-${{ env.VERSION }}-aarch64-tun.dmg
+
+  build-linux-x86_64:
+    needs: [resolve-lock, generate-bridge]
+    runs-on: ubuntu-22.04
+    env:
+      RUST_VERSION: "1.75"
+      FLUTTER_VERSION: "3.24.5"
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Maximize build space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo apt-get update -y
+
+      - name: Install deps
+        run: |
+          sudo apt-get install -y \
+            build-essential clang cmake curl gcc git g++ \
+            libayatana-appindicator3-dev libasound2-dev libclang-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libgtk-3-dev libpulse-dev libva-dev \
+            libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxdo-dev libxfixes-dev nasm ninja-build pkg-config \
+            tree python3 unzip wget xz-utils libssl-dev
+          sudo apt-get remove -y libopus-dev || true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-unknown-linux-gnu
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: ubuntu-22.04-x86_64
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Restore the resolved Cargo.lock
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cargo-lock
+          path: ./
+
+      - name: Confirm the lock points at the patched webrtc
+        run: grep -A2 '^name = "webrtc-ice"' Cargo.lock | grep "eret9616/rustdesk-tun-p2p"
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-linux
+        run: |
+          if ! $VCPKG_ROOT/vcpkg install --triplet x64-linux --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r f; do echo "$f:"; tail -n 80 "$f"; done
+            exit 1
+          fi
+
+      - name: Install Flutter
+        run: |
+          cd /opt
+          sudo wget -q https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz
+          sudo tar xf flutter_linux_${FLUTTER_VERSION}-stable.tar.xz
+          sudo chown -R "$USER" /opt/flutter
+          echo "/opt/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Patch flutter
+        run: |
+          cd /opt/flutter
+          git config --global --add safe.directory /opt/flutter
+          git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff || true
+          cd "$(dirname "$(dirname "$(which flutter)")")" 2>/dev/null || true
+
+      - name: Build rust lib
+        run: |
+          export VCPKG_ROOT=/opt/artifacts/vcpkg
+          cargo build --locked --lib --features hwcodec,flutter,unix-file-copy-paste --release
+
+      - name: Build flutter + deb
+        run: |
+          export VCPKG_ROOT=/opt/artifacts/vcpkg
+          export CARGO_INCREMENTAL=0
+          export DEB_ARCH=amd64
+          flutter --version
+          python3 ./build.py --flutter --skip-cargo
+          ls -l rustdesk*.deb || true
+          for name in rustdesk*.deb; do mv "$name" "rustdesk-${VERSION}-x86_64-tun.deb"; break; done
+          ls -l rustdesk-${VERSION}-x86_64-tun.deb
+
+      - name: Check the patched webrtc-ice is in the binary
+        run: |
+          N=$(find . -name "liblibrustdesk.so" -exec strings -a {} \; 2>/dev/null | grep -c "rustdesk-tun-p2p-[0-9a-f]*/9d694be/ice/" || true)
+          echo "patched webrtc-ice source paths found: $N"
+
+      - name: Upload deb
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-${{ env.VERSION }}-x86_64-tun-deb
+          path: rustdesk-${{ env.VERSION }}-x86_64-tun.deb
