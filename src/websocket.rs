@@ -511,7 +511,27 @@ pub fn check_ws(endpoint: &str) -> String {
         (true, endpoint_port + 2)
     };
 
-    let (address, is_domain) = if crate::is_ip_str(endpoint) {
+    // An IP endpoint can be served over TLS too: with `websocket-port` set, the reverse proxy in
+    // front of this server terminates TLS on that port and forwards /ws/id and /ws/relay, the
+    // same paths a domain endpoint uses. Without it nothing changes - plain ws on 21118/21119.
+    // Worth having because a certificate for a bare IP is now obtainable (Let's Encrypt, 2026-01)
+    // and because plain ws leaves the rendezvous protocol, on its own ports, in the clear.
+    let ip_tls_port = if crate::is_ip_str(endpoint) {
+        websocket_port(&endpoint_host, &relay_server)
+    } else {
+        None
+    };
+    let (address, is_domain) = if let Some(tls_port) = ip_tls_port {
+        let path = if relay { "/ws/relay" } else { "/ws/id" };
+        // split_host_port keeps an IPv6 literal bracketed, which is the form the URL needs.
+        let host = endpoint_host.clone();
+        let port = if tls_port == 443 {
+            String::new()
+        } else {
+            format!(":{}", tls_port)
+        };
+        (format!("{}{}{}", host, port, path), false)
+    } else if crate::is_ip_str(endpoint) {
         (format!("{}:{}", endpoint_host, dst_port), false)
     } else {
         let domain_path = if relay { "/ws/relay" } else { "/ws/id" };
@@ -520,7 +540,11 @@ pub fn check_ws(endpoint: &str) -> String {
             .unwrap_or_default();
         (format!("{}{}{}", endpoint_host, port, domain_path), true)
     };
-    let protocol = if is_domain {
+    let protocol = if ip_tls_port.is_some() {
+        // The proxy in front of an IP endpoint is there to terminate TLS; nothing else would
+        // need a port of its own, so it is always wss, without consulting api-server.
+        "wss"
+    } else if is_domain {
         let api_server = Config::get_option("api-server");
         if api_server.starts_with("https") {
             "wss"
@@ -535,7 +559,8 @@ pub fn check_ws(endpoint: &str) -> String {
 
 /// Port of the reverse proxy serving `/ws/id` and `/ws/relay` on this client's own servers, for
 /// when it cannot listen on the scheme's default port. Any other host, such as a peer's server or
-/// a relay on another machine, keeps the default port. IP endpoints never get here.
+/// a relay on another machine, keeps the default port. Set for an IP endpoint, it also selects
+/// wss and the /ws paths for it, since terminating TLS is what such a proxy is for.
 fn websocket_port(host: &str, relay_server: &str) -> Option<u16> {
     let port = Config::get_option(OPTION_WEBSOCKET_PORT);
     if port.is_empty() {
@@ -789,6 +814,37 @@ mod tests {
             check_ws(&fallback),
             format!("wss://{}/ws/id", fallback_host)
         );
+
+        // An IP endpoint with websocket-port set: TLS on that port and the /ws paths, the same
+        // reverse proxy a domain endpoint gets. api-server is not consulted for it.
+        Config::set_option("custom-rendezvous-server".to_string(), "1.2.3.4".to_string());
+        Config::set_option("relay-server".to_string(), "".to_string());
+        Config::set_option("api-server".to_string(), "".to_string());
+        Config::set_option(keys::OPTION_WEBSOCKET_PORT.to_string(), "443".to_string());
+        // 443 is left implicit, as a browser would write it
+        assert_eq!(check_ws("1.2.3.4:21115"), "wss://1.2.3.4/ws/id");
+        assert_eq!(check_ws("1.2.3.4:21116"), "wss://1.2.3.4/ws/id");
+        assert_eq!(check_ws("1.2.3.4:21117"), "wss://1.2.3.4/ws/relay");
+        // any other port is spelled out
+        Config::set_option(keys::OPTION_WEBSOCKET_PORT.to_string(), "8443".to_string());
+        assert_eq!(check_ws("1.2.3.4:21116"), "wss://1.2.3.4:8443/ws/id");
+        // a bare IPv6 literal keeps the brackets the URL needs
+        Config::set_option(
+            "custom-rendezvous-server".to_string(),
+            "[2001:db8::1]:21116".to_string(),
+        );
+        assert_eq!(
+            check_ws("[2001:db8::1]:21116"),
+            "wss://[2001:db8::1]:8443/ws/id"
+        );
+        // another machine's server is not ours: plain ws on the default port, as before
+        assert_eq!(check_ws("5.6.7.8:21116"), "ws://5.6.7.8:21118");
+        // and with no websocket-port, an IP endpoint is untouched
+        Config::set_option("custom-rendezvous-server".to_string(), "1.2.3.4".to_string());
+        Config::set_option(keys::OPTION_WEBSOCKET_PORT.to_string(), "".to_string());
+        assert_eq!(check_ws("1.2.3.4:21116"), "ws://1.2.3.4:21118");
+        assert_eq!(check_ws("1.2.3.4:21117"), "ws://1.2.3.4:21119");
+
         Config::set_options(options);
     }
     // A server-to-client frame is unmasked, so it can be put on the wire by hand: the header alone,
