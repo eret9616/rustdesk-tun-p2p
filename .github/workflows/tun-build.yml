@@ -194,11 +194,12 @@ jobs:
 
       - name: Install deps
         run: |
+          # gstreamer pulls in a held libunwind-dev conflict on the 22.04 runner and RustDesk
+          # does not need it; drop it. libunwind-dev added explicitly in case anything wants it.
           sudo apt-get install -y \
             build-essential clang cmake curl gcc git g++ \
             libayatana-appindicator3-dev libasound2-dev libclang-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            libgtk-3-dev libpulse-dev libva-dev \
+            libgtk-3-dev libpulse-dev libva-dev libunwind-dev \
             libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxdo-dev libxfixes-dev nasm ninja-build pkg-config \
             tree python3 unzip wget xz-utils libssl-dev
